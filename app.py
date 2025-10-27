@@ -242,7 +242,7 @@ ent_section_name = ttk.Entry(frm_section, width=36)
 ent_section_name.pack(padx=10, pady=4, anchor="w")
 ttk.Button(frm_section, text="Add Section", command=add_section).pack(padx=10, pady=6, anchor="w")
 
-cols2 = ("ID", "Class", "Section")
+cols2 = ("Class", "Section")
 tree_section = ttk.Treeview(frm_section, columns=cols2, show="headings", height=10)
 for c in cols2:
     tree_section.heading(c, text=c,anchor="center")
@@ -539,7 +539,7 @@ def generate_class_month_report():
         present = res[1] or 0
         absent = (total_class_days - present) if total_class_days else 0
         percent = (present / total_class_days * 100) if total_class_days else 0
-        tree_class_report.insert("", tk.END, values=(name, total_class_days, present, absent, f"{percent:.2f}%"))
+        tree_class_report.insert("", tk.END, values=(sid, name, total_class_days, present, absent, f"{percent:.2f}%"))
 
     txt_class_summary.insert(tk.END, f"Total Working Days in {month} {year}: {total_class_days}\n")
     txt_class_summary.insert(tk.END, "Click a student row to check their yearly percentage.\n")
@@ -549,15 +549,12 @@ def on_student_select(event):
     selected = tree_class_report.focus()
     if not selected:
         return
-    student_name = tree_class_report.item(selected)["values"][0]
+    sid = tree_class_report.item(selected)["values"][0]
     year = combo_year_report.get().strip()
 
     # Fetch student ID
-    cur.execute("SELECT id FROM students WHERE name=?", (student_name,))
-    sid = cur.fetchone()
-    if not sid:
-        return
-    sid = sid[0]
+    cur.execute("SELECT name FROM students WHERE id=?", (sid,))
+    student_name = cur.fetchone()[0]
 
     # Yearly stats for that student
     cur.execute('''
@@ -604,7 +601,7 @@ combo_month_report.grid(row=0, column=5, padx=6, pady=4, sticky="w")
 ttk.Button(frame_class_report, text="Generate Report", command=generate_class_month_report).grid(row=0, column=6, padx=10, pady=4)
 
 # Treeview for Class Report
-cols_class_report = ("Student", "Total Days", "Present", "Absent", "Percentage")
+cols_class_report = ("ID", "Student", "Total Days", "Present", "Absent", "Percentage")
 tree_class_report = ttk.Treeview(frame_class_report, columns=cols_class_report, show="headings", height=12)
 for c in cols_class_report:
     tree_class_report.heading(c, text=c, anchor="center")
