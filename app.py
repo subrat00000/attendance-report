@@ -175,9 +175,9 @@ ttk.Button(btnf, text="Delete Class", command=delete_class).grid(row=0, column=1
 
 # -------------------- SECTION CRUD --------------------
 def load_class_combos():
-    cur.execute("SELECT id, class_name FROM classes ORDER BY class_name")
+    cur.execute("SELECT class_name FROM classes ORDER BY class_name")
     classes = cur.fetchall()
-    cat = [f"{r[0]} - {r[1]}" for r in classes]
+    cat = [f"{r[0]}" for r in classes]
     combo_section_class['values'] = cat
     combo_student_class['values'] = cat
     combo_att_class['values'] = cat
@@ -201,7 +201,7 @@ def add_section():
 
 def load_sections_table():
     tree_section.delete(*tree_section.get_children())
-    cur.execute("SELECT s.id, c.class_name, s.section_name FROM sections s JOIN classes c ON s.class_id=c.id ORDER BY c.class_name, s.section_name")
+    cur.execute("SELECT c.class_name, s.section_name FROM sections s JOIN classes c ON s.class_id=c.id ORDER BY c.class_name, s.section_name")
     for r in cur.fetchall():
         tree_section.insert("", tk.END, values=r)
 
@@ -257,9 +257,9 @@ def on_class_selected_for_student(event=None):
     combo_student_section['values'] = []
     if not combo_student_class.get():
         return
-    cid = combo_student_class.get().split("-",1)[0].strip()
-    cur.execute("SELECT id, section_name FROM sections WHERE class_id=? ORDER BY section_name", (cid,))
-    combo_student_section['values'] = [f"{r[0]} - {r[1]}" for r in cur.fetchall()]
+    cid = combo_student_class.get()
+    cur.execute("SELECT section_name FROM sections WHERE class_id=? ORDER BY section_name", (cid,))
+    combo_student_section['values'] = [f"{r[0]}" for r in cur.fetchall()]
 
 def add_student():
     name = ent_student_name.get().strip()
@@ -269,8 +269,8 @@ def add_student():
     if not combo_student_class.get() or not combo_student_section.get():
         messagebox.showwarning("Select", "Choose class and section.")
         return
-    cid = combo_student_class.get().split("-",1)[0].strip()
-    sid = combo_student_section.get().split("-",1)[0].strip()
+    cid = combo_student_class.get()
+    sid = combo_student_section.get()
     cur.execute("INSERT INTO students(name, class_id, section_id) VALUES(?,?,?)", (name, cid, sid))
     conn.commit()
     ent_student_name.delete(0, tk.END)
@@ -311,6 +311,76 @@ def delete_student():
     conn.commit()
     refresh_all()
 
+def refresh_class_filter():
+    cur.execute("SELECT class_name FROM classes ORDER BY class_name")
+    combo_filter_class['values'] = [r[0] for r in cur.fetchall()]
+    combo_filter_class.set('')
+
+def on_filter_class_selected(event=None):
+    combo_filter_section['values'] = []
+    class_name = combo_filter_class.get().strip()
+    if not class_name:
+        return
+    cur.execute("SELECT id FROM classes WHERE class_name=?", (class_name,))
+    row = cur.fetchone()
+    if not row:
+        return
+    cid = row[0]
+    cur.execute("SELECT section_name FROM sections WHERE class_id=? ORDER BY section_name", (cid,))
+    combo_filter_section['values'] = [r[0] for r in cur.fetchall()]
+    combo_filter_section.set('')
+    load_students()
+
+def on_filter_section_selected(event=None):
+    load_students()
+
+def load_students():
+    """Loads students according to selected filter"""
+    tree_student.delete(*tree_student.get_children())
+    if show_all_var.get():
+        cur.execute("""
+            SELECT s.id, s.name, c.class_name, sec.section_name
+            FROM students s
+            JOIN classes c ON s.class_id=c.id
+            JOIN sections sec ON s.section_id=sec.id
+            ORDER BY c.class_name, sec.section_name, s.name
+        """)
+    else:
+        class_name = combo_filter_class.get().strip()
+        section_name = combo_filter_section.get().strip()
+
+        if not class_name:
+            return
+
+        cur.execute("SELECT id FROM classes WHERE class_name=?", (class_name,))
+        c_row = cur.fetchone()
+        if not c_row:
+            return
+        cid = c_row[0]
+
+        if section_name:
+            cur.execute("""
+                SELECT s.id, s.name, c.class_name, sec.section_name
+                FROM students s
+                JOIN classes c ON s.class_id=c.id
+                JOIN sections sec ON s.section_id=sec.id
+                WHERE s.class_id=? AND s.section_id=(SELECT id FROM sections WHERE section_name=? AND class_id=?)
+                ORDER BY s.name
+            """, (cid, section_name, cid))
+        else:
+            cur.execute("""
+                SELECT s.id, s.name, c.class_name, sec.section_name
+                FROM students s
+                JOIN classes c ON s.class_id=c.id
+                JOIN sections sec ON s.section_id=sec.id
+                WHERE s.class_id=?
+                ORDER BY sec.section_name, s.name
+            """, (cid,))
+
+    for r in cur.fetchall():
+        tree_student.insert("", tk.END, values=r)
+
+
 ttk.Label(frm_student, text="Select Class:").pack(padx=10, pady=(12,2), anchor="w")
 combo_student_class = ttk.Combobox(frm_student, width=36, state="readonly")
 combo_student_class.bind("<<ComboboxSelected>>", on_class_selected_for_student)
@@ -325,12 +395,43 @@ ent_student_name = ttk.Entry(frm_student, width=36)
 ent_student_name.pack(padx=10, pady=4, anchor="w")
 ttk.Button(frm_student, text="Add Student", command=add_student).pack(padx=10, pady=6, anchor="w")
 
-cols3 = ("ID", "Name", "Class", "Section")
-tree_student = ttk.Treeview(frm_student, columns=cols3, show="headings", height=10)
-for c in cols3:
-    tree_student.heading(c, text=c,anchor="center")
-    tree_student.column(c, width=200,anchor="center")
-tree_student.pack(padx=10, pady=8, fill="x",anchor="center")
+# Filters row
+filter_frame = ttk.Frame(frm_student)
+filter_frame.pack(padx=10, pady=10, fill='x')
+
+# Class Filter
+lbl_filter_class = ttk.Label(filter_frame, text="Class:")
+lbl_filter_class.grid(row=0, column=0, padx=5, pady=5)
+combo_filter_class = ttk.Combobox(filter_frame, state='readonly', width=20)
+combo_filter_class.grid(row=0, column=1, padx=5, pady=5)
+
+# Section Filter
+lbl_filter_section = ttk.Label(filter_frame, text="Section:")
+lbl_filter_section.grid(row=0, column=2, padx=5, pady=5)
+combo_filter_section = ttk.Combobox(filter_frame, state='readonly', width=20)
+combo_filter_section.grid(row=0, column=3, padx=5, pady=5)
+combo_filter_class.bind("<<ComboboxSelected>>", on_filter_class_selected)
+combo_filter_section.bind("<<ComboboxSelected>>", on_filter_section_selected)
+
+
+
+# Show All Checkbox
+show_all_var = tk.BooleanVar(value=True)
+chk_show_all = ttk.Checkbutton(filter_frame, text="Show All Students", variable=show_all_var, command=lambda: load_students())
+chk_show_all.grid(row=0, column=4, padx=10)
+
+# Treeview for Students
+tree_student = ttk.Treeview(frm_student, columns=("ID", "Name", "Class", "Section"), show="headings", height=15)
+tree_student.heading("ID", text="ID")
+tree_student.heading("Name", text="Name")
+tree_student.heading("Class", text="Class")
+tree_student.heading("Section", text="Section")
+tree_student.pack(padx=10, pady=10, fill='both', expand=True)
+
+# Scrollbars
+scroll_y = ttk.Scrollbar(frm_student, orient="vertical", command=tree_student.yview)
+tree_student.configure(yscrollcommand=scroll_y.set)
+scroll_y.pack(side='right', fill='y', padx=(0,10))
 btns3 = ttk.Frame(frm_student); btns3.pack(padx=10, pady=6, anchor="w")
 ttk.Button(btns3, text="Edit Student", command=edit_student).grid(row=0, column=0, padx=6)
 ttk.Button(btns3, text="Delete Student", command=delete_student).grid(row=0, column=1, padx=6)
@@ -340,16 +441,16 @@ def on_att_class_selected(event=None):
     combo_att_section['values'] = []
     if not combo_att_class.get():
         return
-    cid = combo_att_class.get().split("-",1)[0].strip()
-    cur.execute("SELECT id, section_name FROM sections WHERE class_id=? ORDER BY section_name", (cid,))
-    combo_att_section['values'] = [f"{r[0]} - {r[1]}" for r in cur.fetchall()]
+    cid = combo_att_class.get()
+    cur.execute("SELECT section_name FROM sections WHERE class_id=? ORDER BY section_name", (cid,))
+    combo_att_section['values'] = [f"{r[0]}" for r in cur.fetchall()]
 
 def load_students_for_attendance():
     tree_take.delete(*tree_take.get_children())
     if not combo_att_section.get():
         messagebox.showwarning("Select", "Select class & section")
         return
-    secid = combo_att_section.get().split("-",1)[0].strip()
+    secid = combo_att_section.get()
     cur.execute("SELECT id, name FROM students WHERE section_id=? ORDER BY name", (secid,))
     for r in cur.fetchall():
         tree_take.insert("", tk.END, values=r)
@@ -664,5 +765,8 @@ tree_take.bind("<<TreeviewSelect>>", on_take_select)
 for f in [frm_attendance, frm_view]:
     f.grid_columnconfigure(2, weight=1)
     f.grid_rowconfigure(4, weight=1)
+    
+refresh_class_filter()
+load_students()
 
 root.mainloop()
